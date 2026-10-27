@@ -26,13 +26,17 @@ jobs:
       - name: Make Maven Wrapper executable
         run: chmod +x ./mvnw
 
-      - name: Validate build without tests
-        run: ./mvnw -B -Dmaven.test.skip=true package
-
       - name: Download Polaris CLI
         env:
           POLARIS_SERVER_URL: ${{ secrets.POLARIS_SERVER_URL }}
         run: |
+          set -euxo pipefail
+
+          test -n "$POLARIS_SERVER_URL" || {
+            echo "::error::POLARIS_SERVER_URL is empty"
+            exit 1
+          }
+
           curl -fLsS \
             -o polaris_cli-linux64.zip \
             "${POLARIS_SERVER_URL}/api/tools/polaris_cli-linux64.zip"
@@ -44,17 +48,46 @@ jobs:
 
           chmod +x "${RUNNER_TEMP}/polaris-cli/polaris"
 
+          "${RUNNER_TEMP}/polaris-cli/polaris" --version
+
+      - name: Verify Polaris and Coverity configuration
+        run: |
+          set -euxo pipefail
+
+          pwd
+          ls -la
+
+          test -f coverity.yaml || {
+            echo "::error::coverity.yaml is missing from the repository root"
+            exit 1
+          }
+
+          test -f polaris.yml || {
+            echo "::error::polaris.yml is missing from the repository root"
+            exit 1
+          }
+
+          echo "----- coverity.yaml -----"
+          cat coverity.yaml
+
+          echo "----- polaris.yml -----"
+          cat polaris.yml
+
       - name: Run Coverity on Polaris scan
         env:
           POLARIS_SERVER_URL: ${{ secrets.POLARIS_SERVER_URL }}
           POLARIS_ACCESS_TOKEN: ${{ secrets.POLARIS_ACCESS_TOKEN }}
         run: |
+          set -euxo pipefail
           "${RUNNER_TEMP}/polaris-cli/polaris" analyze -w
 
-      - name: Upload Coverity capture log
+      - name: Upload Coverity diagnostic files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverity-build-log
-          path: .blackduck/polaris/data/coverity/*/idir/build-log.txt
+          name: coverity-diagnostics
+          path: |
+            .blackduck/polaris/configuration/resolved-polaris.yml
+            .blackduck/polaris/data/coverity/*/idir/build-log.txt
+            .blackduck/polaris/data/coverity/*/idir/replay-log.txt
           if-no-files-found: ignore
